@@ -8,7 +8,8 @@ package cn.cy.timewheel.core;
  */
 public interface ScheduledEvent {
 
-    default void startTimingCallback() {}
+	default void startTimingCallback() {
+	}
 
-    void timeoutCallback();
+	void timeoutCallback();
 }

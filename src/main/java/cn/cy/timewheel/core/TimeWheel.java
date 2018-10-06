@@ -19,202 +19,202 @@ import org.apache.logging.log4j.core.LoggerContext;
  */
 public class TimeWheel {
 
-    private TickTimer tickTimer;
+	private TickTimer tickTimer;
 
-    private static Logger logger = LoggerContext.getContext().getLogger(TimeWheel.class.getName());
+	private static Logger logger = LoggerContext.getContext().getLogger(TimeWheel.class.getName());
 
-    // 一圈的槽数
-    private final int slotNum;
+	// 一圈的槽数
+	private final int slotNum;
 
-    private static final int DEFAULT_SLOT_NUM = 20;
+	private static final int DEFAULT_SLOT_NUM = 20;
 
-    // 一个槽所代表的时间,单位是ms
-    private final int milliSecondsPerSlot;
+	// 一个槽所代表的时间,单位是ms
+	private final int milliSecondsPerSlot;
 
-    private static final int DEFAULT_TIME_PER_SLOT = 100;
+	private static final int DEFAULT_TIME_PER_SLOT = 100;
 
-    // 现在走到的指针
-    private volatile int point;
+	// 现在走到的指针
+	private volatile int point;
 
-    // 轮数, 每走过一圈, 轮数自增
-    private volatile long round;
+	// 轮数, 每走过一圈, 轮数自增
+	private volatile long round;
 
-    private ArrayList<Slot<ScheduledEvent>> slotList;
+	private ArrayList<Slot<ScheduledEvent>> slotList;
 
-    public static TimeWheel build() {
-        return new TimeWheel(DEFAULT_SLOT_NUM, DEFAULT_TIME_PER_SLOT);
-    }
+	public static TimeWheel build() {
+		return new TimeWheel(DEFAULT_SLOT_NUM, DEFAULT_TIME_PER_SLOT);
+	}
 
-    // 任务开始时间
-    private long startTime;
+	// 任务开始时间
+	private long startTime;
 
-    // 任务开始计数
-    private long startCnt;
+	// 任务开始计数
+	private long startCnt;
 
-    private TimeWheel(int slotNum, int milliSecondsPerSlot) {
-        this.slotNum = slotNum;
-        this.milliSecondsPerSlot = milliSecondsPerSlot;
-        tickTimer = new BlockingQueueTimer(milliSecondsPerSlot);
-        startCnt = 0;
+	private TimeWheel(int slotNum, int milliSecondsPerSlot) {
+		this.slotNum = slotNum;
+		this.milliSecondsPerSlot = milliSecondsPerSlot;
+		tickTimer = new BlockingQueueTimer(milliSecondsPerSlot);
+		startCnt = 0;
 
-        slotList = new ArrayList<>();
-        // 默认2s一圈
-        for (int i = 0; i < slotNum; i++) {
-            slotList.add(Slot.buildEmptySlot(i, this));
-        }
-    }
+		slotList = new ArrayList<>();
+		// 默认2s一圈
+		for (int i = 0; i < slotNum; i++) {
+			slotList.add(Slot.buildEmptySlot(i, this));
+		}
+	}
 
-    public void start() {
+	public void start() {
 
-        if (startCnt > 0) {
-            throw new IllegalArgumentException("the timer can only started once !");
-        }
+		if (startCnt > 0) {
+			throw new IllegalArgumentException("the timer can only started once !");
+		}
 
-        startCnt++;
-        startTime = System.currentTimeMillis();
+		startCnt++;
+		startTime = System.currentTimeMillis();
 
-        new Thread(() -> {
-            while (true) {
-                // 计时一次
-                // logger.debug("once");
-                tickTimer.once();
+		new Thread(() -> {
+			while (true) {
+				// 计时一次
+				// logger.debug("once");
+				tickTimer.once();
 
-                synchronized(this) {
-                    Slot nowSlot = slotList.get(point);
-                    final long tarRound = round;
-                    final int nowPoint = point;
+				synchronized(this) {
+					Slot nowSlot = slotList.get(point);
+					final long tarRound = round;
+					final int nowPoint = point;
 
-                    new Thread(() -> {
-                        logger.debug("pollEvent {} slot, {} tarRound", nowPoint, tarRound);
-                        nowSlot.pollEvent(tarRound);
-                    }).start();
+					new Thread(() -> {
+						logger.debug("pollEvent {} slot, {} tarRound", nowPoint, tarRound);
+						nowSlot.pollEvent(tarRound);
+					}).start();
 
-                    point++;
-                    if (point >= slotNum) {
-                        point %= slotNum;
-                        // long都溢出了, 这程序得跑到人类灭亡把...
-                        round++;
-                    }
-                }
+					point++;
+					if (point >= slotNum) {
+						point %= slotNum;
+						// long都溢出了, 这程序得跑到人类灭亡把...
+						round++;
+					}
+				}
 
-            }
-        }).start();
-    }
+			}
+		}).start();
+	}
 
-    /**
-     * 在millisLater毫秒之后进行任务
-     *
-     * @param event
-     * @param millisLater
-     */
-    public void addEvent(ScheduledEvent event, long millisLater) {
+	/**
+	 * 在millisLater毫秒之后进行任务
+	 *
+	 * @param event
+	 * @param millisLater
+	 */
+	public void addEvent(ScheduledEvent event, long millisLater) {
 
-        // 注释中的方法只能用于不锁时钟线程的情况下
-        //            long nowTime = System.currentTimeMillis();
-        //            long targetMilliTime = nowTime + millisLater - startTime;
-        //
-        //            long tarRound = targetMilliTime / (slotNum * milliSecondsPerSlot);
-        //            long tarSlotIndex = (targetMilliTime / milliSecondsPerSlot) % slotNum;
-        //
-        //            Slot<ScheduledEvent> tarSlot = slotList.get((int) tarSlotIndex);
-        //            logger.debug("event has been added into {} slot, {} tarRound", tarSlotIndex, tarRound);
-        //            tarSlot.addEvent(tarRound, event);
+		// 注释中的方法只能用于不锁时钟线程的情况下
+		//            long nowTime = System.currentTimeMillis();
+		//            long targetMilliTime = nowTime + millisLater - startTime;
+		//
+		//            long tarRound = targetMilliTime / (slotNum * milliSecondsPerSlot);
+		//            long tarSlotIndex = (targetMilliTime / milliSecondsPerSlot) % slotNum;
+		//
+		//            Slot<ScheduledEvent> tarSlot = slotList.get((int) tarSlotIndex);
+		//            logger.debug("event has been added into {} slot, {} tarRound", tarSlotIndex, tarRound);
+		//            tarSlot.addEvent(tarRound, event);
 
-        int nextIndex = -1;
-        long tarRound = -1;
+		int nextIndex = -1;
+		long tarRound = -1;
 
-        synchronized(this) {
-            long deltaSlotIndex = millisLater / milliSecondsPerSlot;
+		synchronized(this) {
+			long deltaSlotIndex = millisLater / milliSecondsPerSlot;
 
-            if (deltaSlotIndex == 0) {
-                deltaSlotIndex++;
-            }
+			if (deltaSlotIndex == 0) {
+				deltaSlotIndex++;
+			}
 
-            nextIndex = (point + (int) deltaSlotIndex);
-            tarRound = round;
+			nextIndex = (point + (int) deltaSlotIndex);
+			tarRound = round;
 
-            if (nextIndex >= slotNum) {
-                nextIndex -= slotNum;
-                tarRound++;
-            }
-        }
-        Slot<ScheduledEvent> tarSlot = slotList.get(nextIndex);
+			if (nextIndex >= slotNum) {
+				nextIndex -= slotNum;
+				tarRound++;
+			}
+		}
+		Slot<ScheduledEvent> tarSlot = slotList.get(nextIndex);
 
-        logger.debug("nowIndex {}, nextIndex {}", point, nextIndex);
+		logger.debug("nowIndex {}, nextIndex {}", point, nextIndex);
 
-        tarSlot.addEvent(tarRound, event);
-    }
+		tarSlot.addEvent(tarRound, event);
+	}
 
-    /**
-     * 槽位的类定义
-     * <p>
-     * 不使用分层策略, 而是复用这一层.
-     * 每个槽会维护一个 Map<round, List<Event>> 的数据结构
-     */
-    public static class Slot<Event extends ScheduledEvent> {
+	/**
+	 * 槽位的类定义
+	 * <p>
+	 * 不使用分层策略, 而是复用这一层.
+	 * 每个槽会维护一个 Map<round, List<Event>> 的数据结构
+	 */
+	public static class Slot<Event extends ScheduledEvent> {
 
-        // 现在这一槽位所处于的轮数
-        private volatile int nowRound;
+		// 现在这一槽位所处于的轮数
+		private volatile int nowRound;
 
-        // 这个slot所在的下标
-        private final int index;
+		// 这个slot所在的下标
+		private final int index;
 
-        // Map<round, List<Event>>
-        private volatile ConcurrentHashMap<Long, ConcurrentLinkedQueue<Event>> eventMap;
+		// Map<round, List<Event>>
+		private volatile ConcurrentHashMap<Long, ConcurrentLinkedQueue<Event>> eventMap;
 
-        private final TimeWheel timeWheel;
+		private final TimeWheel timeWheel;
 
-        private Slot(int nowRound,
-                     ConcurrentHashMap<Long, ConcurrentLinkedQueue<Event>> eventMap,
-                     int index, TimeWheel timeWheel) {
-            this.nowRound = nowRound;
-            this.eventMap = eventMap;
-            this.index = index;
-            this.timeWheel = timeWheel;
-        }
+		private Slot(int nowRound,
+		             ConcurrentHashMap<Long, ConcurrentLinkedQueue<Event>> eventMap,
+		             int index, TimeWheel timeWheel) {
+			this.nowRound = nowRound;
+			this.eventMap = eventMap;
+			this.index = index;
+			this.timeWheel = timeWheel;
+		}
 
-        @SuppressWarnings("unchecked")
-        public static Slot buildEmptySlot(int index, TimeWheel timeWheel) {
-            return new Slot(0, new ConcurrentHashMap<>(), index, timeWheel);
-        }
+		@SuppressWarnings("unchecked")
+		public static Slot buildEmptySlot(int index, TimeWheel timeWheel) {
+			return new Slot(0, new ConcurrentHashMap<>(), index, timeWheel);
+		}
 
-        public void addEvent(long tarRound, Event event) {
+		public void addEvent(long tarRound, Event event) {
 
-            synchronized(timeWheel) {
-                //                if (tarRound < nowRound) {
-                //                    throw new IllegalArgumentException("you can't add the event into the past");
-                //                }
+			synchronized(timeWheel) {
+				//                if (tarRound < nowRound) {
+				//                    throw new IllegalArgumentException("you can't add the event into the past");
+				//                }
 
-                // 更新任务
-                ConcurrentLinkedQueue<Event> queue = eventMap.getOrDefault(tarRound, null);
-                if (queue == null) {
-                    queue = new ConcurrentLinkedQueue<>();
-                    eventMap.put(tarRound, queue);
-                }
+				// 更新任务
+				ConcurrentLinkedQueue<Event> queue = eventMap.getOrDefault(tarRound, null);
+				if (queue == null) {
+					queue = new ConcurrentLinkedQueue<>();
+					eventMap.put(tarRound, queue);
+				}
 
-                queue.offer(event);
+				queue.offer(event);
 
-                event.startTimingCallback();
-            }
-        }
+				event.startTimingCallback();
+			}
+		}
 
-        // 循环指定round的任务, 进行回调
-        public void pollEvent(long tarRound) {
-            ConcurrentLinkedQueue<Event> queue = eventMap.getOrDefault(tarRound, null);
+		// 循环指定round的任务, 进行回调
+		public void pollEvent(long tarRound) {
+			ConcurrentLinkedQueue<Event> queue = eventMap.getOrDefault(tarRound, null);
 
-            if (queue == null) {
-                logger.debug("There is no events in the slot, tarRound {}", tarRound);
-                return;
-            }
+			if (queue == null) {
+				logger.debug("There is no events in the slot, tarRound {}", tarRound);
+				return;
+			}
 
-            while (!queue.isEmpty()) {
-                // 执行event的回调方法
-                Event event = queue.poll();
-                event.timeoutCallback();
-            }
+			while (!queue.isEmpty()) {
+				// 执行event的回调方法
+				Event event = queue.poll();
+				event.timeoutCallback();
+			}
 
-            // remove the element, help gc
-            eventMap.remove(tarRound);
-        }
-    }
+			// remove the element, help gc
+			eventMap.remove(tarRound);
+		}
+	}
 }

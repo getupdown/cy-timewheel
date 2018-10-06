@@ -15,37 +15,37 @@ import cn.cy.timewheel.exception.MinimumIntervalException;
  */
 public class BlockingQueueTimer implements TickTimer {
 
-    // 最小单位, 默认为100ms
-    private static long MINIMUM_INTERVAL = 100;
+	// 最小单位, 默认为100ms
+	private static long MINIMUM_INTERVAL = 100;
 
-    // 单位是ms
-    private long interval;
+	// 单位是ms
+	private long interval;
 
-    // 使用阻塞队列来模拟
-    private BlockingQueue blockingQueue;
+	// 使用阻塞队列来模拟
+	private BlockingQueue blockingQueue;
 
-    public BlockingQueueTimer(long interval) {
+	public BlockingQueueTimer(long interval) {
 
-        if (interval < MINIMUM_INTERVAL) {
-            throw new MinimumIntervalException(MINIMUM_INTERVAL, interval);
-        }
+		if (interval < MINIMUM_INTERVAL) {
+			throw new MinimumIntervalException(MINIMUM_INTERVAL, interval);
+		}
 
-        this.interval = interval;
-        blockingQueue = new LinkedBlockingQueue();
-    }
+		this.interval = interval;
+		blockingQueue = new LinkedBlockingQueue();
+	}
 
-    @Override
-    public void once() {
-        try {
-            // 阻塞取空队列队首，依次来模拟一次计时
-            blockingQueue.poll(interval, TimeUnit.MILLISECONDS);
-        } catch (InterruptedException e) {
-            e.printStackTrace();
-        }
-    }
+	@Override
+	public void once() {
+		try {
+			// 阻塞取空队列队首，依次来模拟一次计时
+			blockingQueue.poll(interval, TimeUnit.MILLISECONDS);
+		} catch (InterruptedException e) {
+			e.printStackTrace();
+		}
+	}
 
-    @Override
-    public long getInterval() {
-        return interval;
-    }
+	@Override
+	public long getInterval() {
+		return interval;
+	}
 }

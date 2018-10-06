@@ -9,13 +9,13 @@ package cn.cy.timewheel.core;
  */
 public interface TickTimer {
 
-    /**
-     * 进行一次计时
-     */
-    void once();
+	/**
+	 * 进行一次计时
+	 */
+	void once();
 
-    /**
-     * 获取一次计时的间隔
-     */
-    long getInterval();
+	/**
+	 * 获取一次计时的间隔
+	 */
+	long getInterval();
 }
