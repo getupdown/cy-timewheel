@@ -6,6 +6,9 @@ package cn.cy.timewheel.core;
 import java.util.ArrayList;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.Executor;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 import org.apache.logging.log4j.core.Logger;
 import org.apache.logging.log4j.core.LoggerContext;
@@ -39,6 +42,8 @@ public class TimeWheel {
 	// 轮数, 每走过一圈, 轮数自增
 	private volatile long round;
 
+	private Executor executor;
+
 	private ArrayList<Slot<ScheduledEvent>> slotList;
 
 	public static TimeWheel build() {
@@ -62,6 +67,8 @@ public class TimeWheel {
 		for (int i = 0; i < slotNum; i++) {
 			slotList.add(Slot.buildEmptySlot(i, this));
 		}
+
+		executor = Executors.newFixedThreadPool(20);
 	}
 
 	public void start() {
@@ -84,10 +91,10 @@ public class TimeWheel {
 					final long tarRound = round;
 					final int nowPoint = point;
 
-					new Thread(() -> {
+					executor.execute(() -> {
 						logger.debug("pollEvent {} slot, {} tarRound", nowPoint, tarRound);
 						nowSlot.pollEvent(tarRound);
-					}).start();
+					});
 
 					point++;
 					if (point >= slotNum) {
