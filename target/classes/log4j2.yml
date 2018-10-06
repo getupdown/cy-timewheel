@@ -1,0 +1,58 @@
+Configuration:
+  status: error
+  name: cybaseLog4jProp
+  packages: cn.cy.timewheel
+  properties:
+    property:
+      name: logdirectory
+      value: target/logs
+
+  thresholdFilter:
+    level: debug
+
+  Appenders:
+
+    Console:
+      name: STDOUT
+      PatternLayout:
+        Pattern: "%d{DATE} - %p - %t - %M %m %n "
+
+    RollingRandomAccessFile:
+      - name: daily
+        fileName: ${logdirectory}/all.log
+        filePattern: "${logdirectory}/info-%d{MM-dd-yy}-%i.log.gz"
+        PatternLayout:
+          Pattern: "%d{DATE} - %p - %t - %M%m%n"
+        Policies:
+          TimeBasedTriggeringPolicy:
+            interval: 1
+          SizeBasedTriggeringPolicy:
+            size: "256 MB"
+        DefaultRolloverStrategy:
+          max: 1000
+
+      - name: daily_error
+        fileName: ${logdirectory}/error.log
+        ignoreExceptions: false
+        filePattern: "${logdirectory}/error-%d{MM-dd-yy}-%i.log.gz"
+        ThresholdFilter:
+          level: error
+          onMatch: ACCEPT
+          onMismatch: DENY
+        PatternLayout:
+          Pattern: "%d{DATE} - %p - %t - %M%m%n"
+        Policies:
+          TimeBasedTriggeringPolicy:
+            interval: 1
+          SizeBasedTriggeringPolicy:
+            size: "256 MB"
+        DefaultRolloverStrategy:
+          max: 1000
+
+  Loggers:
+    Root:
+      - level: info
+        appender-ref:
+          - ref: STDOUT
+          - ref: daily
+          - ref: daily_error
