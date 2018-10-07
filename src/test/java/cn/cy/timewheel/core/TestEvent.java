@@ -1,7 +1,6 @@
 package cn.cy.timewheel.core;
 
 import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
 
 import org.apache.logging.log4j.core.Logger;
 import org.apache.logging.log4j.core.LoggerContext;
@@ -22,7 +21,8 @@ public class TestEvent implements ScheduledEvent {
 	@Override
 	public void timeoutCallback() {
 		endTime = LocalDateTime.now();
-		logger.debug("task completed! start from:{}, end at: {} ", startTime.format(DateTimeFormatter.ISO_TIME),
-				endTime.format(DateTimeFormatter.ISO_TIME));
+		//		logger.debug("task completed! start from:{}, end at: {} ", startTime.toString(),
+		//				endTime.toString());
+		System.out.println("task completed! start from " + startTime.toString() + ", end at " + endTime.toString());
 	}
 }

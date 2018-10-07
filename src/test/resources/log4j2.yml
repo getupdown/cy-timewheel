@@ -17,37 +17,37 @@ Configuration:
       PatternLayout:
         Pattern: "%d{DATE} - %p - %t - %M %m %n "
 
-    RollingRandomAccessFile:
-      - name: daily
-        fileName: ${logdirectory}/all.log
-        filePattern: "${logdirectory}/info-%d{MM-dd-yy}-%i.log.gz"
-        PatternLayout:
-          Pattern: "%d{DATE} - %p - %t - %M%m%n"
-        Policies:
-          TimeBasedTriggeringPolicy:
-            interval: 1
-          SizeBasedTriggeringPolicy:
-            size: "256 MB"
-        DefaultRolloverStrategy:
-          max: 1000
-
-      - name: daily_error
-        fileName: ${logdirectory}/error.log
-        ignoreExceptions: false
-        filePattern: "${logdirectory}/error-%d{MM-dd-yy}-%i.log.gz"
-        ThresholdFilter:
-          level: error
-          onMatch: ACCEPT
-          onMismatch: DENY
-        PatternLayout:
-          Pattern: "%d{DATE} - %p - %t - %M%m%n"
-        Policies:
-          TimeBasedTriggeringPolicy:
-            interval: 1
-          SizeBasedTriggeringPolicy:
-            size: "256 MB"
-        DefaultRolloverStrategy:
-          max: 1000
+#    RollingRandomAccessFile:
+#      - name: daily
+#        fileName: ${logdirectory}/all.log
+#        filePattern: "${logdirectory}/info-%d{MM-dd-yy}-%i.log.gz"
+#        PatternLayout:
+#          Pattern: "%d{DATE} - %p - %t - %M%m%n"
+#        Policies:
+#          TimeBasedTriggeringPolicy:
+#            interval: 1
+#          SizeBasedTriggeringPolicy:
+#            size: "256 MB"
+#        DefaultRolloverStrategy:
+#          max: 1000
+#
+#      - name: daily_error
+#        fileName: ${logdirectory}/error.log
+#        ignoreExceptions: false
+#        filePattern: "${logdirectory}/error-%d{MM-dd-yy}-%i.log.gz"
+#        ThresholdFilter:
+#          level: error
+#          onMatch: ACCEPT
+#          onMismatch: DENY
+#        PatternLayout:
+#          Pattern: "%d{DATE} - %p - %t - %M%m%n"
+#        Policies:
+#          TimeBasedTriggeringPolicy:
+#            interval: 1
+#          SizeBasedTriggeringPolicy:
+#            size: "256 MB"
+#        DefaultRolloverStrategy:
+#          max: 1000
 
   Loggers:
     Root:

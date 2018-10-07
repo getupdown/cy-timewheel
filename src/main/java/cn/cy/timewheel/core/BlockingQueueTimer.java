@@ -13,7 +13,7 @@ import cn.cy.timewheel.exception.MinimumIntervalException;
 public class BlockingQueueTimer implements TickTimer {
 
 	// 最小单位, 默认为100ms
-	private static long MINIMUM_INTERVAL = 100;
+	private static long MINIMUM_INTERVAL = 20;
 
 	// 单位是ms
 	private long interval;

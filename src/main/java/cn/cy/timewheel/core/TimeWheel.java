@@ -1,7 +1,8 @@
 package cn.cy.timewheel.core;
 
 import java.util.ArrayList;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.HashMap;
+import java.util.List;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
@@ -27,12 +28,12 @@ public class TimeWheel {
 	// 一圈的槽数
 	private final int slotNum;
 
-	private static final int DEFAULT_SLOT_NUM = 20;
+	private static final int DEFAULT_SLOT_NUM = 200;
 
 	// 一个槽所代表的时间,单位是ms
 	private final int milliSecondsPerSlot;
 
-	private static final int DEFAULT_TIME_PER_SLOT = 100;
+	private static final int DEFAULT_TIME_PER_SLOT = 50;
 
 	private volatile Lock lock;
 
@@ -53,10 +54,10 @@ public class TimeWheel {
 	private long startCnt;
 
 	// 任务收集队列
-	private volatile ConcurrentLinkedQueue<ScheduledEvent> collectQueue;
+	private volatile ConcurrentLinkedQueue<EventDescriptor> collectQueue;
 
 	// 单次任务收集的最大值
-	private int SINGLE_ROUND_COLLECTION_MAXIMUM = 10000;
+	private int SINGLE_ROUND_COLLECTION_MAXIMUM = 1000;
 
 	private TimeWheel(int slotNum, int milliSecondsPerSlot) {
 		this.slotNum = slotNum;
@@ -66,12 +67,12 @@ public class TimeWheel {
 
 		slotList = new ArrayList<>();
 		for (int i = 0; i < slotNum; i++) {
-			slotList.add(Slot.buildEmptySlot(i, this));
+			slotList.add(Slot.buildEmptySlot(i));
 		}
 
 		executor = Executors.newFixedThreadPool(20);
 		lock = new ReentrantLock();
-		collectQueue = new ConcurrentLinkedQueue();
+		collectQueue = new ConcurrentLinkedQueue<>();
 	}
 
 	public void start() {
@@ -92,13 +93,12 @@ public class TimeWheel {
 
 				try {
 					lock.lock();
-
+					logger.warn("timing!");
 					Slot nowSlot = slotList.get(point);
 					final long tarRound = round;
 					final int nowPoint = point;
 
 					executor.execute(() -> {
-						logger.debug("pollEvent {} slot, {} tarRound", nowPoint, tarRound);
 						nowSlot.pollEvent(tarRound);
 					});
 
@@ -115,21 +115,29 @@ public class TimeWheel {
 			}
 		}).start();
 
-		// 收集线程, 争抢到锁之后,
+		// 收集线程, 争抢到锁之后, 把事件分发进入各个slot
 		new Thread(() -> {
 			while (true) {
 				try {
 					lock.lock();
-
+					logger.warn("collection!");
 					for (int i = 0; i < SINGLE_ROUND_COLLECTION_MAXIMUM; i++) {
-						ScheduledEvent event = collectQueue.poll();
-						if (event == null) {
+						EventDescriptor descriptor = collectQueue.poll();
+						if (descriptor == null) {
 							break;
 						}
+
+						addEventWithLock(descriptor.getEvent(), descriptor.getMsLater());
 					}
 
 				} finally {
 					lock.unlock();
+					// 让计时线程及时拿到锁
+					try {
+						Thread.sleep(10);
+					} catch (InterruptedException e) {
+						e.printStackTrace();
+					}
 				}
 			}
 		}).start();
@@ -163,9 +171,18 @@ public class TimeWheel {
 		}
 		Slot<ScheduledEvent> tarSlot = slotList.get(nextIndex);
 
-		logger.debug("nowIndex {}, nextIndex {}", point, nextIndex);
-
 		tarSlot.addEvent(tarRound, event);
+	}
+
+	/**
+	 * 对外暴露的添加时间方法
+	 * 把事件包装成 {@link EventDescriptor} 后, 加入队列, 等待消费
+	 *
+	 * @param event
+	 * @param millisLater
+	 */
+	public void addEvent(ScheduledEvent event, long millisLater) {
+		collectQueue.add(new EventDescriptor(event, millisLater));
 	}
 
 	/**
@@ -183,56 +200,44 @@ public class TimeWheel {
 		private final int index;
 
 		// Map<round, List<Event>>
-		private volatile ConcurrentHashMap<Long, ConcurrentLinkedQueue<Event>> eventMap;
-
-		private final TimeWheel timeWheel;
+		private volatile HashMap<Long, List<Event>> eventMap;
 
 		private Slot(int nowRound,
-		             ConcurrentHashMap<Long, ConcurrentLinkedQueue<Event>> eventMap,
-		             int index, TimeWheel timeWheel) {
+		             HashMap<Long, List<Event>> eventMap,
+		             int index) {
 			this.nowRound = nowRound;
 			this.eventMap = eventMap;
 			this.index = index;
-			this.timeWheel = timeWheel;
 		}
 
 		@SuppressWarnings("unchecked")
-		public static Slot buildEmptySlot(int index, TimeWheel timeWheel) {
-			return new Slot(0, new ConcurrentHashMap<>(), index, timeWheel);
+		public static Slot buildEmptySlot(int index) {
+			return new Slot(0, new HashMap<>(), index);
 		}
 
 		public void addEvent(long tarRound, Event event) {
 
-			synchronized(timeWheel) {
-				//                if (tarRound < nowRound) {
-				//                    throw new IllegalArgumentException("you can't add the event into the past");
-				//                }
-
-				// 更新任务
-				ConcurrentLinkedQueue<Event> queue = eventMap.getOrDefault(tarRound, null);
-				if (queue == null) {
-					queue = new ConcurrentLinkedQueue<>();
-					eventMap.put(tarRound, queue);
-				}
-
-				queue.offer(event);
-
-				event.startTimingCallback();
+			// 更新任务
+			List<Event> eventList = eventMap.getOrDefault(tarRound, null);
+			if (eventList == null) {
+				eventList = new ArrayList<>();
+				eventMap.put(tarRound, eventList);
 			}
+
+			eventList.add(event);
+
+			event.startTimingCallback();
 		}
 
 		// 循环指定round的任务, 进行回调
 		public void pollEvent(long tarRound) {
-			ConcurrentLinkedQueue<Event> queue = eventMap.getOrDefault(tarRound, null);
+			List<Event> eventList = eventMap.getOrDefault(tarRound, null);
 
-			if (queue == null) {
-				logger.debug("There is no events in the slot, tarRound {}", tarRound);
+			if (eventList == null) {
 				return;
 			}
 
-			while (!queue.isEmpty()) {
-				// 执行event的回调方法
-				Event event = queue.poll();
+			for (Event event : eventList) {
 				event.timeoutCallback();
 			}
 
@@ -240,8 +245,6 @@ public class TimeWheel {
 			eventMap.remove(tarRound);
 		}
 	}
-
-	// 注释中的方法只能用于不锁时钟线程的情况下
 	//            long nowTime = System.currentTimeMillis();
 	//            long targetMilliTime = nowTime + millisLater - startTime;
 	//
