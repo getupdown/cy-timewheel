@@ -1,14 +1,12 @@
-/*
- * Copyright (C) 2018 Baidu, Inc. All Rights Reserved.
- */
 package cn.cy.timewheel.core;
 
 import java.util.ArrayList;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.Executor;
-import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantLock;
 
 import org.apache.logging.log4j.core.Logger;
 import org.apache.logging.log4j.core.LoggerContext;
@@ -36,6 +34,8 @@ public class TimeWheel {
 
 	private static final int DEFAULT_TIME_PER_SLOT = 100;
 
+	private volatile Lock lock;
+
 	// 现在走到的指针
 	private volatile int point;
 
@@ -46,15 +46,17 @@ public class TimeWheel {
 
 	private ArrayList<Slot<ScheduledEvent>> slotList;
 
-	public static TimeWheel build() {
-		return new TimeWheel(DEFAULT_SLOT_NUM, DEFAULT_TIME_PER_SLOT);
-	}
-
 	// 任务开始时间
 	private long startTime;
 
 	// 任务开始计数
 	private long startCnt;
+
+	// 任务收集队列
+	private volatile ConcurrentLinkedQueue<ScheduledEvent> collectQueue;
+
+	// 单次任务收集的最大值
+	private int SINGLE_ROUND_COLLECTION_MAXIMUM = 10000;
 
 	private TimeWheel(int slotNum, int milliSecondsPerSlot) {
 		this.slotNum = slotNum;
@@ -63,12 +65,13 @@ public class TimeWheel {
 		startCnt = 0;
 
 		slotList = new ArrayList<>();
-		// 默认2s一圈
 		for (int i = 0; i < slotNum; i++) {
 			slotList.add(Slot.buildEmptySlot(i, this));
 		}
 
 		executor = Executors.newFixedThreadPool(20);
+		lock = new ReentrantLock();
+		collectQueue = new ConcurrentLinkedQueue();
 	}
 
 	public void start() {
@@ -80,13 +83,16 @@ public class TimeWheel {
 		startCnt++;
 		startTime = System.currentTimeMillis();
 
+		// 计时线程
 		new Thread(() -> {
 			while (true) {
 				// 计时一次
 				// logger.debug("once");
 				tickTimer.once();
 
-				synchronized(this) {
+				try {
+					lock.lock();
+
 					Slot nowSlot = slotList.get(point);
 					final long tarRound = round;
 					final int nowPoint = point;
@@ -102,48 +108,58 @@ public class TimeWheel {
 						// long都溢出了, 这程序得跑到人类灭亡把...
 						round++;
 					}
-				}
 
+				} finally {
+					lock.unlock();
+				}
+			}
+		}).start();
+
+		// 收集线程, 争抢到锁之后,
+		new Thread(() -> {
+			while (true) {
+				try {
+					lock.lock();
+
+					for (int i = 0; i < SINGLE_ROUND_COLLECTION_MAXIMUM; i++) {
+						ScheduledEvent event = collectQueue.poll();
+						if (event == null) {
+							break;
+						}
+					}
+
+				} finally {
+					lock.unlock();
+				}
 			}
 		}).start();
 	}
 
+	public static TimeWheel build() {
+		return new TimeWheel(DEFAULT_SLOT_NUM, DEFAULT_TIME_PER_SLOT);
+	}
+
 	/**
 	 * 在millisLater毫秒之后进行任务
+	 * 这个方法是在收集线程中, 锁掉时钟之后, 才会被调用的
 	 *
 	 * @param event
 	 * @param millisLater
 	 */
-	public void addEvent(ScheduledEvent event, long millisLater) {
+	private void addEventWithLock(ScheduledEvent event, long millisLater) {
 
-		// 注释中的方法只能用于不锁时钟线程的情况下
-		//            long nowTime = System.currentTimeMillis();
-		//            long targetMilliTime = nowTime + millisLater - startTime;
-		//
-		//            long tarRound = targetMilliTime / (slotNum * milliSecondsPerSlot);
-		//            long tarSlotIndex = (targetMilliTime / milliSecondsPerSlot) % slotNum;
-		//
-		//            Slot<ScheduledEvent> tarSlot = slotList.get((int) tarSlotIndex);
-		//            logger.debug("event has been added into {} slot, {} tarRound", tarSlotIndex, tarRound);
-		//            tarSlot.addEvent(tarRound, event);
+		long deltaSlotIndex = millisLater / milliSecondsPerSlot;
 
-		int nextIndex = -1;
-		long tarRound = -1;
+		if (deltaSlotIndex == 0) {
+			deltaSlotIndex++;
+		}
 
-		synchronized(this) {
-			long deltaSlotIndex = millisLater / milliSecondsPerSlot;
+		int nextIndex = (point + (int) deltaSlotIndex);
+		long tarRound = round;
 
-			if (deltaSlotIndex == 0) {
-				deltaSlotIndex++;
-			}
-
-			nextIndex = (point + (int) deltaSlotIndex);
-			tarRound = round;
-
-			if (nextIndex >= slotNum) {
-				nextIndex -= slotNum;
-				tarRound++;
-			}
+		if (nextIndex >= slotNum) {
+			nextIndex -= slotNum;
+			tarRound++;
 		}
 		Slot<ScheduledEvent> tarSlot = slotList.get(nextIndex);
 
@@ -224,4 +240,15 @@ public class TimeWheel {
 			eventMap.remove(tarRound);
 		}
 	}
+
+	// 注释中的方法只能用于不锁时钟线程的情况下
+	//            long nowTime = System.currentTimeMillis();
+	//            long targetMilliTime = nowTime + millisLater - startTime;
+	//
+	//            long tarRound = targetMilliTime / (slotNum * milliSecondsPerSlot);
+	//            long tarSlotIndex = (targetMilliTime / milliSecondsPerSlot) % slotNum;
+	//
+	//            Slot<ScheduledEvent> tarSlot = slotList.get((int) tarSlotIndex);
+	//            logger.debug("event has been added into {} slot, {} tarRound", tarSlotIndex, tarRound);
+	//            tarSlot.addEvent(tarRound, event);
 }

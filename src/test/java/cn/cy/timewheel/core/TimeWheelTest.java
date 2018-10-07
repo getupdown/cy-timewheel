@@ -1,6 +1,3 @@
-/*
- * Copyright (C) 2018 Baidu, Inc. All Rights Reserved.
- */
 package cn.cy.timewheel.core;
 
 import java.util.concurrent.CountDownLatch;
