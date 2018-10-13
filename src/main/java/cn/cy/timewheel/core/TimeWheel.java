@@ -1,13 +1,12 @@
 package cn.cy.timewheel.core;
 
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
-import java.util.concurrent.locks.Lock;
-import java.util.concurrent.locks.ReentrantLock;
 
 import org.apache.logging.log4j.core.Logger;
 import org.apache.logging.log4j.core.LoggerContext;
@@ -21,237 +20,212 @@ import org.apache.logging.log4j.core.LoggerContext;
  */
 public class TimeWheel {
 
-	private TickTimer tickTimer;
+    private TickTimer tickTimer;
 
-	private static Logger logger = LoggerContext.getContext().getLogger(TimeWheel.class.getName());
+    private static Logger logger = LoggerContext.getContext().getLogger(TimeWheel.class.getName());
 
-	// 一圈的槽数
-	private final int slotNum;
+    // 一圈的槽数
+    private final int slotNum;
 
-	private static final int DEFAULT_SLOT_NUM = 200;
+    private static final int DEFAULT_SLOT_NUM = 200;
 
-	// 一个槽所代表的时间,单位是ms
-	private final int milliSecondsPerSlot;
+    // 一个槽所代表的时间,单位是ms
+    private final int milliSecondsPerSlot;
 
-	private static final int DEFAULT_TIME_PER_SLOT = 50;
+    private static final int DEFAULT_TIME_PER_SLOT = 100;
 
-	private volatile Lock lock;
+    // 现在走到的指针
+    private volatile int point;
 
-	// 现在走到的指针
-	private volatile int point;
+    // 轮数, 每走过一圈, 轮数自增
+    private volatile long round;
 
-	// 轮数, 每走过一圈, 轮数自增
-	private volatile long round;
+    private Executor executor;
 
-	private Executor executor;
+    private ArrayList<Slot<ScheduledEvent>> slotList;
 
-	private ArrayList<Slot<ScheduledEvent>> slotList;
+    // 任务开始时间
+    private LocalDateTime startTime;
 
-	// 任务开始时间
-	private long startTime;
+    // 任务开始计数
+    private long startCnt;
 
-	// 任务开始计数
-	private long startCnt;
+    // 任务收集队列
+    private volatile ConcurrentLinkedQueue<EventDescriptor> collectQueue;
 
-	// 任务收集队列
-	private volatile ConcurrentLinkedQueue<EventDescriptor> collectQueue;
+    // 单次任务收集的最大值
+    private int SINGLE_ROUND_COLLECTION_MAXIMUM = 1000;
 
-	// 单次任务收集的最大值
-	private int SINGLE_ROUND_COLLECTION_MAXIMUM = 1000;
+    private TimeWheel(int slotNum, int milliSecondsPerSlot) {
+        this.slotNum = slotNum;
+        this.milliSecondsPerSlot = milliSecondsPerSlot;
+        tickTimer = new BlockingQueueTimer(milliSecondsPerSlot);
+        startCnt = 0;
 
-	private TimeWheel(int slotNum, int milliSecondsPerSlot) {
-		this.slotNum = slotNum;
-		this.milliSecondsPerSlot = milliSecondsPerSlot;
-		tickTimer = new BlockingQueueTimer(milliSecondsPerSlot);
-		startCnt = 0;
+        slotList = new ArrayList<>();
+        for (int i = 0; i < slotNum; i++) {
+            slotList.add(Slot.buildEmptySlot(i));
+        }
 
-		slotList = new ArrayList<>();
-		for (int i = 0; i < slotNum; i++) {
-			slotList.add(Slot.buildEmptySlot(i));
-		}
+        executor = Executors.newFixedThreadPool(20);
+        collectQueue = new ConcurrentLinkedQueue<>();
+    }
 
-		executor = Executors.newFixedThreadPool(20);
-		lock = new ReentrantLock();
-		collectQueue = new ConcurrentLinkedQueue<>();
-	}
+    private void tick() {
+        // 计时一次
+        // logger.debug("once");
+        tickTimer.once();
 
-	public void start() {
+        logger.warn("timing ");
+        Slot nowSlot = slotList.get(point);
+        final long tarRound = round;
+        final int nowPoint = point;
 
-		if (startCnt > 0) {
-			throw new IllegalArgumentException("the timer can only started once !");
-		}
+        executor.execute(() -> {
+            nowSlot.pollEvent(tarRound);
+        });
 
-		startCnt++;
-		startTime = System.currentTimeMillis();
+        point++;
+        if (point >= slotNum) {
+            point %= slotNum;
+            // long都溢出了, 这程序得跑到人类灭亡把...
+            round++;
+        }
+    }
 
-		// 计时线程
-		new Thread(() -> {
-			while (true) {
-				// 计时一次
-				// logger.debug("once");
-				tickTimer.once();
+    private void collect() {
+        // 由于任务被加进公共队列到真正被取出来加入时间轮，这中间有误差
+        // 在这里做一个补偿机制
+        long baseMillis = System.currentTimeMillis();
+        for (int i = 0; i < SINGLE_ROUND_COLLECTION_MAXIMUM; i++) {
+            EventDescriptor descriptor = collectQueue.poll();
+            if (descriptor == null) {
+                break;
+            }
 
-				try {
-					lock.lock();
-					logger.warn("timing!");
-					Slot nowSlot = slotList.get(point);
-					final long tarRound = round;
-					final int nowPoint = point;
+            addEvent0(descriptor.getEvent(), descriptor.getMsLater(), descriptor.getAddedTime(), baseMillis);
+        }
+    }
 
-					executor.execute(() -> {
-						nowSlot.pollEvent(tarRound);
-					});
+    public void start() {
 
-					point++;
-					if (point >= slotNum) {
-						point %= slotNum;
-						// long都溢出了, 这程序得跑到人类灭亡把...
-						round++;
-					}
+        startCnt++;
+        startTime = LocalDateTime.now();
 
-				} finally {
-					lock.unlock();
-				}
-			}
-		}).start();
+        // 计时线程
+        new Thread(() -> {
+            while (true) {
+                // 收集和计时交替进行
+                tick();
+                collect();
+            }
+        }).start();
+    }
 
-		// 收集线程, 争抢到锁之后, 把事件分发进入各个slot
-		new Thread(() -> {
-			while (true) {
-				try {
-					lock.lock();
-					logger.warn("collection!");
-					for (int i = 0; i < SINGLE_ROUND_COLLECTION_MAXIMUM; i++) {
-						EventDescriptor descriptor = collectQueue.poll();
-						if (descriptor == null) {
-							break;
-						}
+    public static TimeWheel build() {
+        return new TimeWheel(DEFAULT_SLOT_NUM, DEFAULT_TIME_PER_SLOT);
+    }
 
-						addEventWithLock(descriptor.getEvent(), descriptor.getMsLater());
-					}
+    /**
+     * 在millisLater毫秒之后进行任务
+     *
+     * @param event
+     * @param millisLater
+     */
+    private void addEvent0(ScheduledEvent event, long millisLater, long missionStartMillis, long baseMillis) {
 
-				} finally {
-					lock.unlock();
-					// 让计时线程及时拿到锁
-					try {
-						Thread.sleep(10);
-					} catch (InterruptedException e) {
-						e.printStackTrace();
-					}
-				}
-			}
-		}).start();
-	}
+        long deltaSlotIndex = (millisLater - (baseMillis - missionStartMillis)) / milliSecondsPerSlot;
 
-	public static TimeWheel build() {
-		return new TimeWheel(DEFAULT_SLOT_NUM, DEFAULT_TIME_PER_SLOT);
-	}
+        if (deltaSlotIndex == 0) {
+            deltaSlotIndex++;
+        }
 
-	/**
-	 * 在millisLater毫秒之后进行任务
-	 * 这个方法是在收集线程中, 锁掉时钟之后, 才会被调用的
-	 *
-	 * @param event
-	 * @param millisLater
-	 */
-	private void addEventWithLock(ScheduledEvent event, long millisLater) {
+        int nextIndex = (point + (int) deltaSlotIndex);
+        long tarRound = round;
 
-		long deltaSlotIndex = millisLater / milliSecondsPerSlot;
+        //        System.out.println(LocalDateTime.now() + " start is " + startTime.toString() + " now " + point + "
+        // nextIndex "
+        //                + nextIndex);
 
-		if (deltaSlotIndex == 0) {
-			deltaSlotIndex++;
-		}
+        if (nextIndex >= slotNum) {
+            nextIndex -= slotNum;
+            tarRound++;
+        }
+        Slot<ScheduledEvent> tarSlot = slotList.get(nextIndex);
 
-		int nextIndex = (point + (int) deltaSlotIndex);
-		long tarRound = round;
+        tarSlot.addEvent(tarRound, event);
+    }
 
-		if (nextIndex >= slotNum) {
-			nextIndex -= slotNum;
-			tarRound++;
-		}
-		Slot<ScheduledEvent> tarSlot = slotList.get(nextIndex);
+    /**
+     * 对外暴露的添加时间方法
+     * 把事件包装成 {@link EventDescriptor} 后, 加入队列, 等待消费
+     *
+     * @param event
+     * @param millisLater
+     */
+    public void addEvent(ScheduledEvent event, long millisLater) {
+        EventDescriptor eventDescriptor = new EventDescriptor(event, millisLater);
+        collectQueue.add(eventDescriptor);
+    }
 
-		tarSlot.addEvent(tarRound, event);
-	}
+    /**
+     * 槽位的类定义
+     * <p>
+     * 不使用分层策略, 而是复用这一层.
+     * 每个槽会维护一个 Map<round, List<Event>> 的数据结构
+     */
+    public static class Slot<Event extends ScheduledEvent> {
 
-	/**
-	 * 对外暴露的添加时间方法
-	 * 把事件包装成 {@link EventDescriptor} 后, 加入队列, 等待消费
-	 *
-	 * @param event
-	 * @param millisLater
-	 */
-	public void addEvent(ScheduledEvent event, long millisLater) {
-		collectQueue.add(new EventDescriptor(event, millisLater));
-	}
+        // 现在这一槽位所处于的轮数
+        private volatile int nowRound;
 
-	/**
-	 * 槽位的类定义
-	 * <p>
-	 * 不使用分层策略, 而是复用这一层.
-	 * 每个槽会维护一个 Map<round, List<Event>> 的数据结构
-	 */
-	public static class Slot<Event extends ScheduledEvent> {
+        // 这个slot所在的下标
+        private final int index;
 
-		// 现在这一槽位所处于的轮数
-		private volatile int nowRound;
+        // Map<round, List<Event>>
+        private volatile HashMap<Long, List<Event>> eventMap;
 
-		// 这个slot所在的下标
-		private final int index;
+        private Slot(int nowRound,
+                     HashMap<Long, List<Event>> eventMap,
+                     int index) {
+            this.nowRound = nowRound;
+            this.eventMap = eventMap;
+            this.index = index;
+        }
 
-		// Map<round, List<Event>>
-		private volatile HashMap<Long, List<Event>> eventMap;
+        @SuppressWarnings("unchecked")
+        public static Slot buildEmptySlot(int index) {
+            return new Slot(0, new HashMap<>(), index);
+        }
 
-		private Slot(int nowRound,
-		             HashMap<Long, List<Event>> eventMap,
-		             int index) {
-			this.nowRound = nowRound;
-			this.eventMap = eventMap;
-			this.index = index;
-		}
+        public void addEvent(long tarRound, Event event) {
 
-		@SuppressWarnings("unchecked")
-		public static Slot buildEmptySlot(int index) {
-			return new Slot(0, new HashMap<>(), index);
-		}
+            // 更新任务
+            List<Event> eventList = eventMap.getOrDefault(tarRound, null);
+            if (eventList == null) {
+                eventList = new ArrayList<>();
+                eventMap.put(tarRound, eventList);
+            }
 
-		public void addEvent(long tarRound, Event event) {
+            eventList.add(event);
 
-			// 更新任务
-			List<Event> eventList = eventMap.getOrDefault(tarRound, null);
-			if (eventList == null) {
-				eventList = new ArrayList<>();
-				eventMap.put(tarRound, eventList);
-			}
+            event.startTimingCallback();
+        }
 
-			eventList.add(event);
+        // 循环指定round的任务, 进行回调
+        public void pollEvent(long tarRound) {
+            List<Event> eventList = eventMap.getOrDefault(tarRound, null);
 
-			event.startTimingCallback();
-		}
+            if (eventList == null) {
+                return;
+            }
 
-		// 循环指定round的任务, 进行回调
-		public void pollEvent(long tarRound) {
-			List<Event> eventList = eventMap.getOrDefault(tarRound, null);
+            for (Event event : eventList) {
+                event.timeoutCallback();
+            }
 
-			if (eventList == null) {
-				return;
-			}
-
-			for (Event event : eventList) {
-				event.timeoutCallback();
-			}
-
-			// remove the element, help gc
-			eventMap.remove(tarRound);
-		}
-	}
-	//            long nowTime = System.currentTimeMillis();
-	//            long targetMilliTime = nowTime + millisLater - startTime;
-	//
-	//            long tarRound = targetMilliTime / (slotNum * milliSecondsPerSlot);
-	//            long tarSlotIndex = (targetMilliTime / milliSecondsPerSlot) % slotNum;
-	//
-	//            Slot<ScheduledEvent> tarSlot = slotList.get((int) tarSlotIndex);
-	//            logger.debug("event has been added into {} slot, {} tarRound", tarSlotIndex, tarRound);
-	//            tarSlot.addEvent(tarRound, event);
+            // remove the element, help gc
+            eventMap.remove(tarRound);
+        }
+    }
 }

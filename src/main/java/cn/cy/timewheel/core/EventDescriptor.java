@@ -1,20 +1,38 @@
 package cn.cy.timewheel.core;
 
 public class EventDescriptor {
-	private ScheduledEvent event;
 
-	private long msLater;
+    /**
+     * 等待定时的任务对象
+     */
+    private ScheduledEvent event;
 
-	public EventDescriptor(ScheduledEvent event, long msLater) {
-		this.event = event;
-		this.msLater = msLater;
-	}
+    /**
+     * 多少毫秒后执行
+     */
+    private long msLater;
 
-	public ScheduledEvent getEvent() {
-		return event;
-	}
+    /**
+     * 记录这个事件被加入公共队列的时间
+     * 用于 {@link TimeWheel#addEvent(ScheduledEvent, long)}中的补偿机制
+     */
+    private long addedTime;
 
-	public long getMsLater() {
-		return msLater;
-	}
+    public EventDescriptor(ScheduledEvent event, long msLater) {
+        this.event = event;
+        this.msLater = msLater;
+        this.addedTime = System.currentTimeMillis();
+    }
+
+    public ScheduledEvent getEvent() {
+        return event;
+    }
+
+    public long getMsLater() {
+        return msLater;
+    }
+
+    public long getAddedTime() {
+        return addedTime;
+    }
 }
