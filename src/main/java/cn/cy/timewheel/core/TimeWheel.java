@@ -198,7 +198,7 @@ public class TimeWheel {
             return new Slot(0, new HashMap<>(), index);
         }
 
-        public void addEvent(long tarRound, Event event) {
+        private void addEvent(long tarRound, Event event) {
 
             // 更新任务
             List<Event> eventList = eventMap.getOrDefault(tarRound, null);
@@ -213,7 +213,7 @@ public class TimeWheel {
         }
 
         // 循环指定round的任务, 进行回调
-        public void pollEvent(long tarRound) {
+        private void pollEvent(long tarRound) {
             List<Event> eventList = eventMap.getOrDefault(tarRound, null);
 
             if (eventList == null) {
