@@ -14,6 +14,11 @@ import org.apache.logging.log4j.core.LoggerContext;
 /**
  * 时间轮核心逻辑
  * <p>
+ * 这个时间轮目前支持的是大量的,频繁的定时,
+ * 任务描述形式是 "在x时间后要执行某个任务"
+ * 而不是 "在某个时间执行某个任务"
+ * <p>
+ * <p>
  * 这里并未使用分层时间轮，而是复用同一个时间轮
  * 在每个槽上有轮数来标识，现在是走到的第几圈
  * 支持的最小单位是秒
@@ -32,7 +37,11 @@ public class TimeWheel {
     // 一个槽所代表的时间,单位是ms
     private final int milliSecondsPerSlot;
 
-    private static final int DEFAULT_TIME_PER_SLOT = 100;
+    /**
+     * 这个建议值:
+     * "在x时间后要执行的任务" 这种描述形式, 那么取这些任务中 x的最小值的 1/20
+     */
+    private static final int DEFAULT_TIME_PER_SLOT = 50;
 
     // 现在走到的指针
     private volatile int point;
@@ -40,6 +49,7 @@ public class TimeWheel {
     // 轮数, 每走过一圈, 轮数自增
     private volatile long round;
 
+    // 执行回调逻辑的线程池
     private Executor executor;
 
     private ArrayList<Slot<ScheduledEvent>> slotList;
@@ -53,8 +63,8 @@ public class TimeWheel {
     // 任务收集队列
     private volatile ConcurrentLinkedQueue<EventDescriptor> collectQueue;
 
-    // 单次任务收集的最大值
-    private int SINGLE_ROUND_COLLECTION_MAXIMUM = 1000;
+    // 单次任务收集的最大值, 这里可以取 单个slot时间(ms)的20倍左右
+    private int SINGLE_ROUND_COLLECTION_MAXIMUM;
 
     private TimeWheel(int slotNum, int milliSecondsPerSlot) {
         this.slotNum = slotNum;
@@ -68,7 +78,10 @@ public class TimeWheel {
         }
 
         executor = Executors.newFixedThreadPool(20);
+
         collectQueue = new ConcurrentLinkedQueue<>();
+        // 取 单个slot时间(ms)的50倍
+        SINGLE_ROUND_COLLECTION_MAXIMUM = this.milliSecondsPerSlot * 20;
     }
 
     private void tick() {
@@ -136,16 +149,8 @@ public class TimeWheel {
 
         long deltaSlotIndex = (millisLater - (baseMillis - missionStartMillis)) / milliSecondsPerSlot;
 
-        if (deltaSlotIndex == 0) {
-            deltaSlotIndex++;
-        }
-
         int nextIndex = (point + (int) deltaSlotIndex);
         long tarRound = round;
-
-        //        System.out.println(LocalDateTime.now() + " start is " + startTime.toString() + " now " + point + "
-        // nextIndex "
-        //                + nextIndex);
 
         if (nextIndex >= slotNum) {
             nextIndex -= slotNum;

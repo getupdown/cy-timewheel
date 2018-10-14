@@ -130,6 +130,33 @@ public class TimeWheelTest {
         }
 
         countDownLatch.await();
+    }
+
+    /**
+     * 测试普通的定时效率
+     */
+    @Test
+    public void testNormalCountDown() throws InterruptedException {
+        CountDownLatch countDownLatch = new CountDownLatch(1);
+
+        for (int i = 0 ;i < 1000 ; i ++) {
+            new Thread(() -> {
+                Random random = new Random();
+
+                while (true) {
+                    int x = Math.abs(random.nextInt()) % 100;
+
+                    if (x < 30) {
+                        try {
+                            Thread.sleep(5000);
+                        } catch (InterruptedException e) {
+                            e.printStackTrace();
+                        }
+                        System.out.println("xing");
+                    }
+                }
+            }).start();
+        }
 
         countDownLatch.await();
     }
