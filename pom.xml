@@ -15,7 +15,7 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <log4j.version>2.11.1</log4j.version>
         <snakeyml.version>1.17</snakeyml.version>
-        <jacksondatabind.version>2.8.10</jacksondatabind.version>
+        <jacksondatabind.version>2.8.11</jacksondatabind.version>
     </properties>
 
     <dependencies>
